@@ -1,0 +1,752 @@
+
+
+#####-----------------------------------------------------------------------------#####
+#####        required packages for clustering programs of  this data set          #####
+#####-----------------------------------------------------------------------------#####
+
+
+
+#install.packages("ClustGeo")  ## R (> 3.0.0)
+#install.packages("mvnormtest")## was built under R version 0.1-9
+#install.packages("energy")    ## R (> 2.10)
+#install.packages("sp")        ## R (> 3.0.0)
+#install.packages("spdep")     ## R (> 3.3.0) 
+#install.packages("factoextra")## R (> 3.1.2) 
+#install.packages("HCV")       ## R (> 4.0.0)
+#install.packages("fields")    ## R (> 3.0)
+#install.packages("cluster")   ## R (> 3.5.0)
+#install.packages("adespatial")
+
+
+library(ClustGeo)     ## for 'estuary' data
+library(mvnormtest)   ## for function 'mshapiro.test'
+library(energy)       ## for function 'mvnorm.test'
+library(sp)           ## for plotting map 
+library(spdep)        ## for function 'poly2nb'
+library(factoextra)   ## for function 'get_dist'
+library(HCV)          ## for function 'plotMap'
+library(fields)       ## for function 'tim.colors'
+library(cluster)      ## for function 'silhouette'
+library(adespatial)   ## for function 'constr.hclust'
+
+
+#####-----------------------------------------------------------------------------#####
+#####       Downloading and reading the map information of "estuary" data         #####
+#####-----------------------------------------------------------------------------#####
+
+
+###---------------------------- The estuary dataset  -----------------------------###
+##package ‘ClustGeo’ was built under R version 4.1.3
+
+#install.packages("ClustGeo") 
+library(ClustGeo)
+
+data(estuary)
+
+## a data frame "dat" with the description of the 303 municipalities on 4 socio-economic variables
+
+dat <- estuary$dat
+class(dat)
+##[1] "data.frame"
+
+
+head(dat)
+
+##a matrix with the distances between the town halls of the 303 municipalities
+D.geo <- estuary$D.geo
+class(D.geo)
+##[1] "matrix" "array"
+
+dim(D.geo)
+
+##an object map of class SpatialPolygonsDataFrame with the map of the municipalities  
+map <- estuary$map 
+summary(map)
+
+
+## description of 5 municipalities in the map
+head(map@data)
+head(map@data[,4:8])
+
+
+###------------------------------------------------------------------###
+###                        Normality Test                            ###
+###------------------------------------------------------------------### 
+
+## ------ Method 1: Shapiro-Wilk Test for Multivariate Normality  -----
+## 
+#install.packages("mvnormtest")
+library(mvnormtest)
+mvnormtest::mshapiro.test(t(dat))
+
+## Shapiro-Wilk normality test
+## data:  Z
+## W = 0.75207, p-value < 2.2e-16   ## reject of Multivariate normal distribution
+
+
+
+## ------ Method 2: E-statistics (energy) test for Multivariate Normality -------
+## 
+#install.packages("energy")
+library(energy)
+energy::mvnorm.test(dat, R = 199)
+
+## Energy test of multivariate normality: estimated parameters
+## data:  x, sample size 303, dimension 4, replicates 199
+## E-statistic = 10.267, p-value < 2.2e-16   ## reject of Multivariate normal dist
+
+
+
+## ------ Method 3: plotting graph for sample variance versus sample size ------
+
+## response attribute1: employ rate
+## response attribute2: graduation rate
+## response attribute3: ratio of apartment housing
+## response attribute4: agricultural area
+
+
+par(mfrow=c(2,2))
+
+x1=dat[,1]
+n1=length(x1)
+v1=sapply(seq_along(x1), function(i) sd(x1[1:i]))
+plot(2:n1,v1[-1],type="l",lty=1, main="Attribute1" ,
+     xlab = 'sample size', ylab = 'sample variance')
+
+## ********************
+
+x2=dat[,2]
+n2=length(x2)
+v2=sapply(seq_along(x2), function(i) sd(x2[1:i]))
+plot(2:n2,v2[-1],type="l",lty=1, main="Attribute2",
+     xlab = 'sample size', ylab = 'sample variance')
+
+
+## ********************
+
+x3=dat[,3]
+n3=length(x3)
+v3=sapply(seq_along(x3), function(i) sd(x3[1:i]))
+plot(2:n3,v3[-1],type="l",lty=1, main="Attribute3",
+     xlab = 'sample size', ylab = 'sample variance')
+
+
+## ********************
+
+x4=dat[,4]
+n4=length(x4)
+v4=sapply(seq_along(x4), function(i) sd(x4[1:i]))
+plot(2:n4,v4[-1],type="l",lty=1, main="Attribute4",
+     xlab = 'sample size', ylab = 'sample variance')
+
+
+
+
+###------------------------------------------------------------------------###
+###              plot heatmaps of standardized response attributes         ###
+###------------------------------------------------------------------------### 
+library("HCV")       
+library("fields")
+
+
+#data(estuary)
+#dat <- estuary$dat
+#map <- estuary$map 
+
+colors <- tim.colors(303)
+
+par(mai=c(0,0,0,0))
+par(mfrow=c(2,2))
+
+
+plotMap(map, dat[,1], color=colors, zlim=c(min(dat[,1]), max(dat[,1])), bar='Attribute1')
+plotMap(map, dat[,2], color=colors, zlim=c(min(dat[,2]), max(dat[,2])), bar='Attribute2')
+plotMap(map, dat[,3], color=colors, zlim=c(min(dat[,3]), max(dat[,3])), bar='Attribute3')
+plotMap(map, dat[,4], color=colors, zlim=c(min(dat[,4]), max(dat[,4])), bar='Attribute4')
+
+
+
+
+
+
+#####-----------------------------------------------------------------------------#####
+#####  creating "queen", "rook", "Delaunay" and "distance-based" neighbors list   #####
+#####        object and neighborhood matrix and links according to it.            #####
+#####-----------------------------------------------------------------------------#####
+#install.packages("spdep")
+#library(spdep)  ## for function 'poly2nb'
+
+data(estuary)
+dat = estuary$dat
+D.geo = estuary$D.geo
+map = estuary$map
+
+ 
+###--------------------------------     "Queen" neighbors      ---------------------------------
+
+neighborslist.queen=poly2nb(map,queen=TRUE, row.names = rownames(dat))##creating neighbours list of each city
+adj.matrix.queen = nb2mat(neighborslist.queen, style="B")   ## creating neighborhood matrix 
+nblistw.queen =nb2listw(neighborslist.queen, style="B", zero.policy = TRUE)  ##creating listw object
+neighbors.queen = listw2sn(nblistw.queen)[,1:2]         ## links
+
+
+
+
+###--------------------------------     "Rook" neighbors      ----------------------------------
+
+neighborslist.rook = poly2nb(map, queen=FALSE, row.names = rownames(dat))      
+adj.matrix.rook = nb2mat(neighborslist.rook, style="B") #, zero.policy = TRUE 
+nblistw.rook =nb2listw(neighborslist.rook , style="B", zero.policy = TRUE) ##creating listw object
+neighbors.rook = listw2sn(nblistw.rook)[,1:2]  #links
+
+
+
+###--------------------------------    "Delaunay" neighbors    ----------------------------------
+
+neighborslist.Delaunay = tri2nb(coordinates(map))      
+adj.matrix.Delaunay= nb2mat(neighborslist.Delaunay, style="B") #, zero.policy = TRUE 
+nblistw.Delaunay =nb2listw(neighborslist.Delaunay, style="B", zero.policy = TRUE )
+neighbors.Delaunay = listw2sn(nblistw.Delaunay)[,1:2]       #links
+
+
+
+
+#-----------------------------     "distance-based" neighbors      ------------------------------
+## k-nearest neighbour objects(k=1)  
+## this is Non-symmetric neighbours matrix. So we creat symmetric neighbours matrix.
+
+k.near.neigh.list1 = knn2nb(knearneigh(coordinates(map), k = 1))  ## k-nearest neighbour objects(k=1) 
+dist.numeric1 <- unlist(nbdists(k.near.neigh.list1, coordinates(map)))   
+neighborslist.k1 <- dnearneigh(coordinates(map), d1 = 0, d2 = 1.5 * max(dist.numeric1))
+adj.matrix.dist1= nb2mat(neighborslist.k1, style="B", zero.policy = TRUE)
+nblistw.k1=nb2listw(neighborslist.k1, style="B", zero.policy = TRUE ) ##creating listw object 
+neighbors.Dist= listw2sn(nblistw.k1)[,1:2]  #links
+
+
+
+
+
+
+#####-----------------------------------------------------------------------------#####
+#####              Determining number of clusters with HCV package                ##### 
+#####-----------------------------------------------------------------------------#####
+
+
+dat-scaled <- as.matrix(scale(dat))
+Matdist = as.matrix(dist(dat, method = "manhattan")) 
+Matadj = adj.matrix.rook
+#fdist <- as.matrix(dist(dat-scaled)) ** 2         ## squared Euclidean distance
+#adj <- rgeos::gTouches(map, byid=TRUE) * 1  ## an adjacency matrix by map (SpatialPolygonsDataFrame). 
+
+tree <- HCV(Matadj, Matdist, adjacency = TRUE, diss = 'precomputed')
+m3c <- getCluster(tree1, method='M3C')  #Determining Appropriate Clusters for HCV Objects
+
+
+
+
+
+#####-----------------------------------------------------------------------------#####
+#####                          ClustGeo  algorithm                                #####
+#####-----------------------------------------------------------------------------#####
+## we replace parameter 'alpha' by parameter 'theta' in the source of this algorithm:  
+ 
+choicetheta=function (D0, D1, range.theta, K, wt = NULL, scale = TRUE, graph = TRUE) 
+{
+    if (is.null(D0)) 
+        stop("D0 must be an argument", call. = FALSE)
+    if (is.null(D1)) 
+        stop("D1 must be an argument", call. = FALSE)
+    if (class(D0) != "dist") 
+        stop("DO must be of class dist (use as.dist)", 
+            call. = FALSE)
+    if (class(D1) != "dist") 
+        stop("D1 must be of class dist (use as.dist)", 
+            call. = FALSE)
+    n.theta <- length(range.theta)
+    n <- as.integer(attr(D1, "Size"))
+    if (is.null(n)) 
+        stop("invalid dissimilarities", call. = FALSE)
+    if (is.na(n) || n > 65536L) 
+        stop("size cannot be NA nor exceed 65536", call. = FALSE)
+    if (n < 2) 
+        stop("must have n >= 2 objects to cluster", call. = FALSE)
+    if (!is.null(D1) && length(D0) != length(D1)) 
+        stop("the two dissimilarity structures must have the same size", 
+            call. = FALSE)
+    if ((max(range.theta) > 1) || (max(range.theta) < 0)) 
+        stop("Values range.theta must be in [0,1]", call. = FALSE)
+    if (scale == TRUE) {
+        D0 <- D0/max(D0)
+        D1 <- D1/max(D1)
+    }
+    if (is.null(wt)) 
+        wt <- rep(1/n, n)
+    W <- matrix(0, length(range.theta), 2)
+    rownames(W) <- paste("theta=", range.theta, sep = "")
+    colnames(W) <- c("W0", "W1")
+    for (i in 1:length(range.theta)) {
+        tree <- hclustgeo2(D0, D1, range.theta[i], scale = scale, wt = wt)
+        part <- cutree(tree, k = K)
+        W[i, 1] <- withindiss(D0, part, wt)
+        W[i, 2] <- withindiss(D1, part, wt)
+    }
+    T0 <- inertdiss(D0, wt = wt)
+    T1 <- inertdiss(D1, wt = wt)
+    Q <- matrix(0, length(range.theta), 2)
+    rownames(Q) <- rownames(W)
+    colnames(Q) <- c("Q0", "Q1")
+    Q[, 1] <- 1 - W[, 1]/T0
+    Q[, 2] <- 1 - W[, 2]/T1
+    Qnorm <- matrix(0, length(range.theta), 2)
+    rownames(Qnorm) <- rownames(W)
+    colnames(Qnorm) <- c("Q0norm", "Q1norm")
+    Qnorm[, 1] <- Q[, 1]/Q[1, 1]
+    Qnorm[, 2] <- Q[, 2]/Q[length(range.theta), 2]
+    if (graph == TRUE) {
+        listpos <- c("topleft", "bottomleft", "topright", "bottomright")
+        pos <- listpos[order(c(1 - Q[1, 1], Q[1, 2], 1 - Q[length(range.theta), 
+            2], Q[length(range.theta), 1]), decreasing = TRUE)[1]]
+
+#par(mfrow=c(1,2))
+        
+matplot(range.theta, Q, xlab = expression(theta),
+         ylim = c(0,1), ylab = "Q", type = "b", pch = c(8,16),
+          lty = 1:2, main = paste("K=", K, "clusters"))
+  legend(pos, legend = paste("based on", c("D0", "D1")),
+         col = 1:2, lty = 1, pch = 16, bty = "n", cex = 1)
+  listpos <- c("bottomleft", "bottomright")
+   pos <- listpos[order(c(Qnorm[1, 2], Qnorm[length(range.theta), 1]),
+ decreasing = TRUE)[1]]
+matplot(range.theta, Qnorm, xlab = expression(theta),
+         ylim = c(0,1), ylab = "Q*", type = "b", pch = c(8,16),
+         lty = 1:2, main = paste("K=", K, "clusters"))
+ legend(pos, legend = paste("based on", c("D0", "D1")), col = 1:2,
+         lty = 1, pch = 16, bty = "n", cex = 1)
+  mtext(side = 3, paste("of ", round(Q[1, 1] * 100, digits = 0), "%",
+         sep = ""), cex = 1, adj = 0)
+  mtext(side = 3, paste("of ", round(Q[length(range.theta), 2] * 100,
+         digits = 0), "%", sep = ""), cex = 1, adj = 1)
+    }
+retlist2 <- list(Q = Q, Qnorm = Qnorm, range.theta= range.theta, K = K)
+    class(retlist2) <- "choicetheta"
+    return(retlist2)
+}
+
+#####-----------------------------------------------------------------------------
+
+ hclustgeo2= function (D0, D1 = NULL, theta = 0, scale = TRUE, wt = NULL) 
+{
+    if (class(D0) != "dist") 
+        stop("DO must be of class dist (use as.dist)", 
+            call. = FALSE)
+    if (!is.null(D1) && (class(D1) != "dist")) 
+        stop("D1 must be of class dist (use as.dist)", 
+            call. = FALSE)
+    n <- as.integer(attr(D0, "Size"))
+    if (is.null(n)) 
+        stop("invalid dissimilarities", call. = FALSE)
+    if (is.na(n) || n > 65536L) 
+        stop("size cannot be NA nor exceed 65536", call. = FALSE)
+    if (n < 2) 
+        stop("must have n >= 2 objects to cluster", call. = FALSE)
+    if (!is.null(D1) && length(D0) != length(D1)) 
+        stop("the two dissimilarity structures must have the same size", 
+            call. = FALSE)
+    if ((max(theta) > 1) || (max(theta) < 0)) 
+        stop("Values theta must be in [0,1]", call. = FALSE)
+    if ((scale == TRUE) && (!is.null(D1))) {
+        D0 <- D0/max(D0)
+        D1 <- D1/max(D1)
+    }
+    delta0 <- wardinit(D0, wt)
+    if (!is.null(D1)) 
+        delta1 <- wardinit(D1, wt)
+    else delta1 <- 0
+    delta <- (1 - theta) * delta0 + theta * delta1
+    res2 <- hclust(delta, method = "ward.D2", members = wt)
+    return(res2)
+}
+
+
+
+
+
+
+#####-----------------------------------------------------------------------------#####
+#####                Neighborhood matrix in ClustGeo algorithm                    #####
+#####-----------------------------------------------------------------------------#####    
+
+city_label <- as.vector(map$"NOM_COMM")
+
+
+# A = adj.matrix.queen; colnames(A) = rownames(A) = city_label
+  A = adj.matrix.rook; colnames(A) = rownames(A) = city_label
+# A = adj.matrix.Delaunay; colnames(A) = rownames(A) = city_label
+# A = adj.matrix.dist1; colnames(A) = rownames(A) = city_label
+
+
+
+#####-----------------------------------------------------------------------------#####
+#####           distance matrix for values of attributes (observations)           #####
+#####-----------------------------------------------------------------------------##### 
+
+# D.data= dist(scale(dat), method = "euclidean") 
+ D.data= dist(scale(dat), method = "manhattan")
+# D.data = dist(scale(dat), method = "maximum")
+# D.data= dist(scale(dat), method = "canberra")
+# D.data= dist(scale(dat), method = "minkowski", p=0.9)    ## and other values of p  
+#
+#
+#
+## --------- mahalanobis distance matrix:
+#
+## x: data frame
+## cx: covariance matrix; if not provided,it will be estimated from the data
+
+mah <- function(x, cx = NULL) {
+  if(is.null(cx)) cx <- cov(x)   ##or: cx <-diag(c(var(x[,1]), var(x[,2])))
+  out <- lapply(1:nrow(x), function(i) {
+    mahalanobis(x = x, 
+                center = do.call("c", x[i, ]),
+                cov = cx)
+  })
+  return(as.dist(do.call("rbind", out)))
+}
+
+#x=scale(dat)
+#D.data= mah(x)
+#
+#
+
+### ---- Compute the "pearson", "spearman" and "kendall" correlation distance matrix:
+#install.package("factoextra")
+#library("factoextra") ## for function 'get_dist'
+#
+#D.data= get_dist(scale(dat), method = "pearson") ## pearson correlation distance matrix
+#D.data= get_dist(scale(dat), method = "spearman") ## spearmancorrelation distance matrix
+#D.data= get_dist(scale(dat), method = "kendall") ## kendall correlation distance matrix
+#
+
+
+#####-----------------------------------------------------------------------------#####
+#####                      Compute Matrices in ClustGeo algorithm                 #####
+#####-----------------------------------------------------------------------------#####
+
+diag(A) = 1 
+colnames(A) = rownames(A)
+D1 = as.dist(1-A)
+D0 = D.data      # the socio-economic distances
+
+
+#####-----------------------------------------------------------------------------#####
+#####               Ward-like hierarchical clustering with D0 and D1              #####
+#####-----------------------------------------------------------------------------#####
+
+##----------------     Choice of the mixing parameter theta     ----------------
+
+range.theta<- seq(0,1, 0.1)
+K = 7
+par(mfrow=c(2,1))
+cr = choicetheta(D0, D1, range.theta =seq(0,1,0.1), K=7, graph=TRUE) # FALSE
+
+cr$Q           # proportion of explained pseudo-inertia
+cr$Qnorm       ## normalized proportion of explained pseudo-inertia
+
+
+
+
+## ---------------------------------------------------------------------------------
+
+tree1 <- hclustgeo2(D0, D1, theta=0.1)
+tree2 <- hclustgeo2(D0, D1, theta=0.2)
+tree3 <- hclustgeo2(D0, D1, theta=0.3)
+tree4 <- hclustgeo2(D0, D1, theta=0.4)
+tree5 <- hclustgeo2(D0, D1, theta=0.5)
+tree6 <- hclustgeo2(D0, D1, theta=0.6)
+tree7 <- hclustgeo2(D0, D1, theta=0.7)
+tree8 <- hclustgeo2(D0, D1, theta=0.8)
+tree9 <- hclustgeo2(D0, D1, theta=0.9)
+tree10 <- hclustgeo2(D0, D1, theta=1)
+## ---------------------------------------------------------------------------------------
+lab_cluster1 = cutree(tree1, k=7)
+lab_cluster2 = cutree(tree2, k=7)
+lab_cluster3 = cutree(tree3, k=7)
+lab_cluster4 = cutree(tree4, k=7)
+lab_cluster5 = cutree(tree5, k=7)
+lab_cluster6 = cutree(tree6, k=7)
+lab_cluster7 = cutree(tree7, k=7)
+lab_cluster8 = cutree(tree8, k=7)
+lab_cluster9 = cutree(tree9, k=7)
+lab_cluster10 = cutree(tree10, k=7)
+
+
+
+## ----------------------         silhouette index      ---------------------------
+#library(cluster)
+
+silhouette1 = silhouette(lab_cluster1, dist = D.data)
+silhouette2 = silhouette(lab_cluster2, dist = D.data)
+silhouette3 = silhouette(lab_cluster3, dist = D.data)
+silhouette4 = silhouette(lab_cluster4, dist = D.data)
+silhouette5 = silhouette(lab_cluster5, dist = D.data)
+silhouette6 = silhouette(lab_cluster6, dist = D.data)
+silhouette7 = silhouette(lab_cluster7, dist = D.data)
+silhouette8 = silhouette(lab_cluster8, dist = D.data)
+silhouette9 = silhouette(lab_cluster9, dist = D.data)
+silhouette10 = silhouette(lab_cluster10, dist = D.data)
+
+
+
+
+
+
+
+### ------------------------- plotting clustered-ClustGeo  map -----------------------------
+ par(mar=c(0,0,0,0))
+
+plot(map, border=gray(.2), 
+col=c("darkorange","yellow","green","red","cyan","violet","blue")[lab_cluster3], main="", axes=F)
+
+
+legend("topleft", legend = paste("cluster",1:7), 
+    fill=c("green","darkorange","red","yellow","cyan","blue","violet"), bty= "n", border = "white")
+
+
+
+
+
+
+####################################################################################
+###                 the space- and time-constrained           ###
+###                                                                              ###   
+####################################################################################
+#install.packages("adespatial")
+library(adespatial)
+
+###--------------------------------------------------------------------------
+###      Clustering with a contiguity constraint described by a list of links:
+###--------------------------------------------------------------------------
+#
+
+#neighbors = neighbors.queen
+#neighbors = neighbors.rook
+#neighbors = neighbors.Delaunay
+#neighbors = neighbors.Dist
+
+
+
+#####           distance matrix for values of attributes (observations)           #####
+#####-----------------------------------------------------------------------------##### 
+
+# D.data= dist(scale(dat), method = "euclidean") 
+# D.data= dist(dat, method = "manhattan")
+# D.data = dist(dat, method = "maximum")
+# D.data= dist(dat, method = "canberra")
+# D.data= dist(dat, method = "minkowski", p=0.9)    ## and other values of p  
+#
+#
+## --- mahalanobis distance matrix:
+#x=dat
+#D.data= mah(x)
+#
+
+### -- Compute the "pearson", "spearman" and "kendall" correlation distance matrix:
+#install.package("factoextra")
+#library("factoextra") ## for function 'get_dist'
+#
+#D.data= get_dist(dat, method = "pearson") ## pearson correlation distance matrix
+#D.data= get_dist(dat, method = "spearman") ## spearmancorrelation distance matrix
+#D.data= get_dist((dat), method = "kendall") ## kendall correlation distance matrix
+#
+
+
+###--------------------------------------------------------------------------
+### constr.hclust
+###--------------------------------------------------------------------------
+
+constr_hclust.complete<- constr.hclust(D.data, method="complete", neighbors) 
+constr_hclust.single<- constr.hclust(D.data, method="single", neighbors)
+constr_hclust.wardD2<- constr.hclust(D.data, method="ward.D2", neighbors)
+constr_hclust.average<- constr.hclust(D.data, method="average", neighbors)
+constr_hclust.median<- constr.hclust(D.data, method="median", neighbors)
+constr_hclust.centroid<- constr.hclust(D.data, method="centroid", neighbors)
+constr_hclust.mcquitty<- constr.hclust(D.data, method="mcquitty", neighbors)
+#
+
+###-------------------------------------------------------------------
+lab.complete=cutree(constr_hclust.complete, k=7)
+lab.single=cutree(constr_hclust.single, k=7)
+lab.wardD2=cutree(constr_hclust.wardD2, k=7)
+lab.average=cutree(constr_hclust.average, k=7)
+lab.median=cutree(constr_hclust.median, k=7)
+lab.centroid=cutree(constr_hclust.centroid, k=7)
+lab.mcquitty=cutree(constr_hclust.mcquitty, k=7)
+#
+
+
+
+
+
+## ----------------------         silhouette index      ---------------------------
+#library(cluster)
+
+silhouette1 = silhouette(lab.complete, dist = D.data)
+silhouette2 = silhouette(lab.single, dist = D.data)
+silhouette3 = silhouette(lab.wardD2, dist = D.data)
+silhouette4 = silhouette(lab.average, dist = D.data)
+silhouette5 = silhouette(lab.median, dist = D.data)
+silhouette6 = silhouette(lab.centroid, dist = D.data)
+silhouette7 = silhouette(lab.mcquitty, dist = D.data)
+
+
+
+
+###############     plotting clustered data    #################################
+
+####-----  Manhattan-Ward-queen-Spaced contrained plot   
+
+par(mar=c(0,0,0,0))
+
+plot(map, border=gray(.2), 
+col=c("darkorange","red","green","violet","blue","yellow","cyan")[lab.wardD2], main="", axes=F)
+
+
+legend("topleft", legend = paste("cluster",1:7), 
+    fill=c("green","darkorange","red","yellow","cyan","blue","violet"), bty= "n", border = "white")
+
+
+
+
+
+
+
+
+#####################################################################################
+######                                                                           ####  
+######              SKATER algorithm: Contiguity-constrained cluster             ####
+######                                                                           #### 
+#####################################################################################
+
+## neighborslist:        
+
+
+#neighborslist.queen         
+neighborslist.rook
+#neighborslist.Delaunay
+#neighborslist.k1
+
+
+
+
+
+##
+## -----------------------    rook neighborslist  ------------------------
+
+## function 'nbcosts' from package 'spdep'
+
+edgecosts.Euclidean=nbcosts(neighborslist.rook, dat, method="euclidean") 
+edgecosts.Manhattan=nbcosts(neighborslist.rook, dat, method="manhattan") 
+edgecosts.Maximum=nbcosts(neighborslist.rook, dat, method="maximum") 
+edgecosts.Canberra=nbcosts(neighborslist.rook, dat, method="canberra") 
+edgecosts.Mikow0.2=nbcosts(neighborslist.rook, dat, method="minkowski",p=0.2)
+edgecosts.Mikow0.5=nbcosts(neighborslist.rook, dat, method="minkowski",p=0.5)
+edgecosts.Mikow0.9=nbcosts(neighborslist.rook, dat, method="minkowski",p=0.9)
+edgecosts.Mahala=nbcosts(neighborslist.rook, dat, method="mahalanobis",
+                     cov=cov(dat), inverted = FALSE)  
+
+## 
+
+## -----------------------    spatial weights matrix   ----------------------- 
+
+
+nb2listw.Euclidean<- nb2listw(neighborslist.rook, edgecosts.Euclidean, style="B")
+nb2listw.Manhattan<- nb2listw(neighborslist.rook, edgecosts.Manhattan, style="B")
+nb2listw.Maximum<- nb2listw(neighborslist.rook, edgecosts.Maximum, style="B")
+nb2listw.Canberra<- nb2listw(neighborslist.rook, edgecosts.Canberra, style="B")
+nb2listw.Mikow0.2<- nb2listw(neighborslist.rook, edgecosts.Mikow0.2, style="B")
+nb2listw.Mikow0.5<- nb2listw(neighborslist.rook, edgecosts.Mikow0.5, style="B")
+nb2listw.Mikow0.9<- nb2listw(neighborslist.rook, edgecosts.Mikow0.9, style="B")
+nb2listw.Mahala<- nb2listw(neighborslist.rook, edgecosts.Mahala, style="B")
+
+
+
+
+##------------------------  Minimum Spanning Tree    -----------------------
+
+mst.bh.Euclidean<- mstree(nb2listw.Euclidean) 
+mst.bh.Manhattan<- mstree(nb2listw.Manhattan) 
+mst.bh.Maximum<- mstree(nb2listw.Maximum) 
+mst.bh.Canberra<- mstree(nb2listw.Canberra) 
+mst.bh.Mikow0.2<- mstree(nb2listw.Mikow0.2) 
+mst.bh.Mikow0.5<- mstree(nb2listw.Mikow0.5) 
+mst.bh.Mikow0.9<- mstree(nb2listw.Mikow0.9) 
+mst.bh.Mahala<- mstree(nb2listw.Mahala)
+
+
+
+## --------------------   skater function  ----------------------
+#library(spdep)
+
+# k=7: To obtain four clusters, we specify the first two columns of the minimum
+#spanning tree matrix, the data frame with the standardized values and set the 
+#number of cuts to 6.
+
+
+clus.Euclidean <- skater(mst.bh.Euclidean[,1:2], dat, 6) 
+clus.Manhattan <- skater(mst.bh.Manhattan[,1:2], dat, 6) 
+clus.Maximum <- skater(mst.bh.Maximum[,1:2], dat, 6) 
+clus.Canberra <- skater(mst.bh.Canberra[,1:2], dat, 6) 
+clus.Mikow0.2 <- skater(mst.bh.Mikow0.2[,1:2], dat, 6) 
+clus.Mikow0.5 <- skater(mst.bh.Mikow0.5[,1:2], dat, 6) 
+clus.Mikow0.9 <- skater(mst.bh.Mikow0.9[,1:2], dat, 6) 
+clus.Mahala <- skater(mst.bh.Mahala[,1:2], dat, 6) 
+
+#str(clus.Euclidean)
+
+
+## --------------------   labels of clustering     -------------------------
+
+lab.Euclidean = clus.Euclidean$groups
+lab.Manhattan = clus.Manhattan$groups
+lab.Maximum = clus.Maximum$groups
+lab.Canberra = clus.Canberra$groups
+lab.Mikow0.2 = clus.Mikow0.2$groups
+lab.Mikow0.5 = clus.Mikow0.5$groups
+lab.Mikow0.9 = clus.Mikow0.9$groups
+lab.Mahala = clus.Mahala$groups
+
+
+## ----------------------         silhouette index      ---------------------------
+#library(cluster)
+
+silhouette1 = silhouette(lab.Euclidean, dist = dist(scale(dat), method = "euclidean"))
+silhouette2 = silhouette(lab.Mahala, dist = mah(scale(dat)))
+silhouette3 = silhouette(lab.Manhattan, dist = dist(scale(dat), method = "manhattan"))
+silhouette4 = silhouette(lab.Canberra, dist = dist(scale(dat), method = "canberra"))
+silhouette5 = silhouette(lab.Maximum, dist = dist(scale(dat), method = "maximum"))
+silhouette6 = silhouette(lab.Mikow0.2, dist = dist(scale(dat), method = "minkowski", p=0.2))
+silhouette7 = silhouette(lab.Mikow0.5, dist = dist(scale(dat), method = "minkowski", p=0.5))
+silhouette8 = silhouette(lab.Mikow0.9, dist = dist(scale(dat), method = "minkowski", p=0.9))
+
+
+
+
+
+
+%%%*****************  Manhattan- Rook-SKATER  plot   **********************************
+par(mar=c(0,0,0,0))
+
+plot(map, border=gray(.2), 
+col=c("violet","cyan","darkorange","yellow","blue","red","green")[lab.Manhattan], main="", axes=F)
+
+
+legend("topleft", legend = paste("cluster",1:7), 
+    fill=c("green","darkorange","red","yellow","cyan","blue","violet"), bty= "n", border = "white")
+
+
+
+
+
+
+
+
